@@ -1,169 +1,314 @@
-# queuectl — Java Spring Boot + Picocli Job Queue
+QueueCTL — CLI Background Job Queue (Java + Spring Boot)
+A minimal, production-style CLI job queue with workers, retries (exponential backoff), a Dead Letter Queue (DLQ), and persistent storage.
 
-A minimal, production‑grade **CLI-based background job queue** implemented in **Java (Spring Boot + JPA + SQLite + Picocli)**.
-
-It supports:
-- Enqueuing jobs (shell commands)
-- Running **multiple worker threads** (and multiple processes if you run `worker start` in several shells)
-- **Automatic retries** with **exponential backoff**
-- **Dead Letter Queue (DLQ)** after exhausting retries
-- **Persistent storage** (SQLite) across restarts
-- **Config management** via CLI (max retries, backoff base, poll interval, etc.)
-- **Graceful shutdown**: workers finish current job when stop is requested
-- **Minimal metrics** via `status` including active workers (heartbeats)
-
-> Bonus: Each job's stdout/stderr is captured to a log file: `./logs/<jobId>.log`
-
----
-
-## Setup Instructions
-
-### Requirements
-- **JDK 17+**
-- **Maven 3.9+**
-
-### Build
-```bash
-mvn -q -DskipTests package
-```
-
-### Run
-```bash
-java -jar target/queuectl-1.0.0.jar --help
-```
-
----
-
-## Usage Examples
-
-### Enqueue
-```bash
-java -jar target/queuectl-1.0.0.jar enqueue "echo hello"
-java -jar target/queuectl-1.0.0.jar enqueue "sleep 2" --id job1 --max-retries 3 --backoff-base 2
-java -jar target/queuectl-1.0.0.jar enqueue "echo at 10:05" --run-at "2025-11-09T10:05:00+05:30"
-```
-
-### Workers
-```bash
-# Start 3 threads
-java -jar target/queuectl-1.0.0.jar worker start --count 3
-
-# In another shell, stop gracefully (after current jobs finish)
-java -jar target/queuectl-1.0.0.jar worker stop
-```
-
-### Status
-```bash
-java -jar target/queuectl-1.0.0.jar status
-```
-
-### List Jobs
-```bash
-java -jar target/queuectl-1.0.0.jar list
-java -jar target/queuectl-1.0.0.jar list --state FAILED
-```
-
-### Dead Letter Queue
-```bash
-java -jar target/queuectl-1.0.0.jar dlq list
-java -jar target/queuectl-1.0.0.jar dlq retry job1
-```
-
-### Config
-```bash
-java -jar target/queuectl-1.0.0.jar config set max_retries 5
-java -jar target/queuectl-1.0.0.jar config get max_retries
-```
-
----
-
-## Architecture Overview
-
-**Storage**: SQLite via Spring Data JPA. Schema auto‑managed (`ddl-auto=update`).  
-**Job State Machine**:
-- `PENDING` → `PROCESSING` → `COMPLETED` on exit code 0
-- else attempts++, compute backoff delay, schedule new `nextRunAt`
-  - if attempts ≤ maxRetries → `FAILED` (will be retried)
-  - else `DEAD` (DLQ)
-
-**Exponential Backoff**:  
-`delaySeconds = backoffBase ^ attempts`
-
-**Duplicate Prevention**:  
-Workers use a conditional `UPDATE` to claim a job, so only one wins the race.
-
-**Workers**: N threads per process. Run multiple processes for more parallelism. Output goes to `logs/<id>.log`.
-
-**Graceful Stop**: `worker stop` sets DB flag `workers.stop=true`. Running workers check the flag between jobs and exit cleanly.
-
-**Heartbeats**: One row per `worker start` process; `status` shows those updated in last 10s.
-
----
-
-## Assumptions & Trade‑offs
-
-- SQLite chosen for simplicity and single-file persistence. For heavy concurrency, prefer PostgreSQL.
-- Stop is cooperative, not forced kill.
-- No per-job timeout (bonus idea).
-- Priority is simple integer (higher first).
-
----
-
-## Testing Instructions
-
-A quick demo script:
-```bash
-chmod +x scripts/demo.sh
-./scripts/demo.sh
-```
-
-What it validates:
-- Successful job completes.
-- A failing job retries with backoff and moves to DLQ.
-- Multiple workers process in parallel without overlap.
-- Job data persists in `queuectl.db`.
-- Invalid command demonstrates failure handling.
-
----
-
-## Assumptions & Simplifications
-
-- CLI JSON payload not required—use flags (`--id`, `--max-retries`, etc.).
-- Uses the system shell to execute commands (Windows/Unix supported).
-- `status` uses heartbeats to infer active workers.
-
----
-
-## License
-MIT
+Built for the Backend Developer Internship assignment.
+This README is copy-paste ready for GitHub.
 
 
----
+✨ Highlights
 
-## Using MySQL instead of SQLite
 
-1. Create DB & user:
+🧰 CLI-first: enqueue, worker start/stop, status, list, dlq list/retry, config get/set/show
 
-```sql
-CREATE DATABASE queuectl CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-CREATE USER 'queuectl'@'%' IDENTIFIED BY 'queuectl_pw';
-GRANT ALL PRIVILEGES ON queuectl.* TO 'queuectl'@'%';
-FLUSH PRIVILEGES;
-```
 
-2. Build and run:
+🔁 Automatic retries with exponential backoff (delay = base^attempts)
 
-```bash
-mvn -q clean package -DskipTests
-java -jar target/queuectl-1.0.0.jar status
-```
 
-Configured in `src/main/resources/application.properties`:
+🪦 Dead Letter Queue (DLQ) after max retries
 
-```
-spring.datasource.url=jdbc:mysql://localhost:3306/queuectl?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Kolkata&createDatabaseIfNotExist=true
-spring.datasource.username=queuectl
-spring.datasource.password=queuectl_pw
-spring.jpa.database-platform=org.hibernate.dialect.MySQLDialect
+
+💾 Persistence via MySQL + JPA/Hibernate (survives restarts)
+
+
+🧵 Multiple workers with safe locking and heartbeats
+
+
+🛑 Graceful shutdown (finishes current job)
+
+
+⚙️ Runtime config: max retries, backoff base, poll/heartbeat intervals
+
+
+✅ Smoke tests via scripts/validate.ps1 (Windows) & scripts/validate.sh (Linux/macOS)
+
+
+
+🧱 Project Structure (key parts)
+queuectl/
+├─ src/main/java/com/queuectl/
+│  ├─ Application.java
+│  ├─ cli/                  # CLI command handlers
+│  ├─ domain/               # JPA entities (Job, WorkerHeartbeat, KeyValueConfig)
+│  ├─ repo/                 # Spring Data repositories
+│  └─ service/              # JobService, WorkerService, Backoff/Locking logic
+├─ src/main/resources/
+│  └─ application.properties
+├─ scripts/
+│  ├─ validate.ps1          # Windows end-to-end smoke test
+│  └─ validate.sh           # Linux/macOS end-to-end smoke test
+├─ pom.xml
+└─ README.md
+
+
+🏗️ Architecture Overview
+Storage
+
+
+jobs – queue storage (pending/processing/completed/failed/dead), scheduling fields, priority, locking
+
+
+worker_heartbeats – liveness/host/pid/threads + last seen timestamps
+
+
+kv_config – runtime config (max_retries, backoff_base, workers.stop, etc.)
+
+
+Core flow
+
+
+enqueue adds a PENDING job (run_at / next_run_at control schedule).
+
+
+worker polls the earliest runnable job (state=PENDING AND next_run_at<=NOW()), atomically locks it, and sets state=PROCESSING.
+
+
+Job command is executed via OS shell; exit code 0 ⇒ COMPLETED.
+
+
+On failure, attempts++ and next_run_at += base^attempts.
+When attempts > max_retries ⇒ DEAD (goes to DLQ).
+
+
+Worker heartbeats are stored in worker_heartbeats and graceful stop is controlled by kv_config.workers.stop=true.
+
+
+Backoff
+delay_seconds = backoff_base ^ attempts
+
+
+🗄️ Database Schema (MySQL)
+Tables (simplified):
+
+
+jobs
+
+
+id (PK), command, state (PENDING|PROCESSING|COMPLETED|FAILED|DEAD),
+attempts, max_retries, backoff_base, priority,
+run_at, next_run_at, created_at, updated_at,
+locked_by, locked_at, exit_code, last_error, log_path
+
+
+Indexes: idx_jobs_state, idx_jobs_next_run_at, idx_jobs_priority, idx_jobs_locked(locked_by, locked_at)
+
+
+
+
+worker_heartbeats
+
+
+worker_id (PK), host, pid, threads, created_at, updated_at
+
+
+
+
+kv_config
+
+
+k (PK), v (text)
+
+
+
+
+
+Note: Entity fields are explicitly mapped to snake_case columns (e.g., next_run_at, created_at) to match SQL.
+
+
+🔧 Prerequisites
+
+
+JDK 17+
+
+
+Maven 3.9+
+
+
+MySQL 8+
+
+
+Shell: PowerShell (Windows) or Bash (Linux/macOS)
+
+
+Configure DB in src/main/resources/application.properties:
+spring.datasource.url=jdbc:mysql://localhost:3306/queuectl?useSSL=false&serverTimezone=UTC
+spring.datasource.username=YOUR_USER
+spring.datasource.password=YOUR_PASS
 spring.jpa.hibernate.ddl-auto=update
-```
+spring.jpa.open-in-view=false
+
+
+▶️ Build & Run
+# From project root
+mvn -DskipTests package
+
+# Run CLI
+java -jar target/queuectl-1.0.0.jar --help
+
+
+🖱️ CLI Usage (Examples)
+Enqueue jobs
+# Simple echo
+java -jar target/queuectl-1.0.0.jar enqueue "echo hello from job 1"
+
+# Failing job with custom retry/backoff
+java -jar target/queuectl-1.0.0.jar enqueue "cmd /c exit 1" --id bad1 --max-retries 2 --backoff-base 2   # Windows
+# or
+java -jar target/queuectl-1.0.0.jar enqueue "sh -c 'echo will fail; exit 1'" --id bad1 --max-retries 2 --backoff-base 2   # Linux/macOS
+
+# Slow job with priority
+java -jar target/queuectl-1.0.0.jar enqueue "timeout /T 2" --priority 5  # Windows
+# or
+java -jar target/queuectl-1.0.0.jar enqueue "sleep 2" --priority 5       # Linux/macOS
+
+Start / Stop workers
+# Start two workers
+java -jar target/queuectl-1.0.0.jar worker start --count 2
+
+# Request graceful stop (workers finish current job)
+java -jar target/queuectl-1.0.0.jar worker stop
+
+Status & Listing
+java -jar target/queuectl-1.0.0.jar status
+java -jar target/queuectl-1.0.0.jar list
+java -jar target/queuectl-1.0.0.jar list --state pending
+
+DLQ management
+java -jar target/queuectl-1.0.0.jar dlq list
+java -jar target/queuectl-1.0.0.jar dlq retry bad1
+
+Runtime config
+# Show all
+java -jar target/queuectl-1.0.0.jar config show
+
+# Get single key
+java -jar target/queuectl-1.0.0.jar config get max_retries
+
+# Set values
+java -jar target/queuectl-1.0.0. jar config set max_retries 3
+java -jar target/queuectl-1.0.0. jar config set backoff_base 2
+java -jar target/queuectl-1.0.0. jar config set workers.stop true   # signal graceful stop
+
+
+🔬 One-Command Smoke Tests
+Windows (PowerShell)
+# Allow script for this session only
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+# From project root:
+powershell -ExecutionPolicy Bypass -File .\scripts\validate.ps1
+
+Linux/macOS (Bash)
+chmod +x scripts/validate.sh
+./scripts/validate.sh
+
+The validation scripts:
+
+
+build the JAR,
+
+
+enqueue a success, a failure with retries, and a slow job,
+
+
+start workers, then stop gracefully,
+
+
+print status, DLQ, and job list.
+
+
+
+🧪 Expected Scenarios (covered)
+
+
+✅ Basic job completes (exit code 0)
+
+
+✅ Failing job retries with exponential backoff
+
+
+✅ Moves to DLQ after max_retries
+
+
+✅ Multiple workers without double-processing (lock + heartbeat)
+
+
+✅ Invalid commands fail gracefully and are retried/moved to DLQ
+
+
+✅ Persistence: jobs/config/heartbeats survive restarts
+
+
+✅ CLI: all required commands implemented and documented
+
+
+
+🧠 Assumptions & Trade-offs
+
+
+Commands are executed through the host shell (cmd on Windows, sh on *nix).
+Callers provide OS-appropriate commands in enqueue.
+
+
+Scheduling uses run_at / next_run_at; workers poll by next_run_at <= NOW().
+
+
+Minimal logging is kept in DB (exit_code, last_error) + console logs.
+
+
+DB is single instance; for multi-node workers, MySQL row locks prevent contention.
+
+
+
+🧭 Roadmap (nice-to-have)
+
+
+Job timeouts and kill
+
+
+Output capture and persisted logs
+
+
+Priority queues and partitions
+
+
+Web dashboard & metrics
+
+
+Batch retry / bulk operations
+
+
+More unit/integration tests
+
+
+
+❓ Troubleshooting
+
+
+mvn not found → Install Maven and ensure it’s on PATH.
+
+
+DB connection errors → Check application.properties URL/creds; ensure MySQL is running and DB exists.
+
+
+Workers don’t stop → config set workers.stop true, then check status for updated flag.
+
+
+Indexes already exist → Safe to ignore; DDL is idempotent in scripts.
+
+
+
+📜 License
+MIT 
+
+🙌 Credits
+Designed & implemented by Aman Kumar (SKYTOX07) as part of the internship assignment.
